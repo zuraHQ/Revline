@@ -29,6 +29,8 @@ export async function localWorkerCapabilities() {
   }
   const pixel = pixelTrackPython();
   if (pixel !== scene && !await available('pixel tracking / OpenCV', pixel, ['-c', 'import cv2'])) excludedKinds.add('derive');
+  // The Genesis compositor runs in the same OpenCV environment.
+  if (!await available('Genesis compositor / OpenCV', pixel, ['-c', 'import cv2, numpy'])) excludedKinds.add('genesis');
   const beat = beatTrackPython();
   const model = beatTrackModelPath();
   if (!await available('Beat This', beat, ['-c', 'import beat_this, torch, torchaudio']) || !existsSync(model)) {

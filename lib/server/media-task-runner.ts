@@ -41,6 +41,7 @@ import { runDistributedRender, runRenderWorker } from './render-worker';
 import { importVideoLink } from './import-video-link';
 import { removeBackground } from './remove-background';
 import { deriveMedia, measureColor } from './derive-media';
+import { runGenesisJob } from '../ai/lanes/genesis/worker/run';
 import { prepareComposition,writeComposition } from './prepare-composition';
 import { renderPlainExport } from './plain-export-render';
 import { plainExportPlan } from '@/lib/editor/plain-export';
@@ -183,7 +184,7 @@ export async function processMediaTask(task: MediaWorkItem, convex: ConvexHttpCl
       ? { url: asset.previewUrl, size: asset.previewSize!, width: asset.previewWidth!, height: asset.previewHeight!, contentType: 'video/mp4' } : undefined;
     const download = preview ?? { url: sourceAsset.url, size: sourceAsset.size, width: sourceAsset.width, height: sourceAsset.height, contentType: sourceAsset.contentType };
     const audioOnly = ['extract', 'waveform', 'transcribe', 'beats'].includes(task.kind);
-    const rangeRead = (sourceAsset.kind === 'video' && (task.kind === 'read' && task.read?.mode !== 'track' || task.kind === 'frames' || task.kind === 'derive' || task.kind === 'cutout'));
+    const rangeRead = (sourceAsset.kind === 'video' && (task.kind === 'read' && task.read?.mode !== 'track' || task.kind === 'frames' || task.kind === 'derive' || task.kind === 'cutout' || task.kind === 'genesis'));
     const localSource = join(directory, 'source'), sourceUrl = download.url;
     let source = rangeRead ? ownedMediaUrl(download.url, new URL(convexUrl).origin) : localSource;
     const cacheIdentity = mediaSourceCacheIdentity(convexUrl, task.projectId, sourceAsset);
@@ -255,6 +256,17 @@ export async function processMediaTask(task: MediaWorkItem, convex: ConvexHttpCl
       await runPhase('Saving processed media', () => uploadMediaFile(output.path, { ...credentials, projectId: task.projectId, fileName: `${base}${suffix}.${output.contentType.split('/')[1].replace('jpeg', 'jpg')}`, kind: output.kind, contentType: output.contentType, width: output.width, height: output.height, ...(output.duration ? { duration: output.duration } : {}) }, uploadContext, signal));
       onProgress(98);
       return {};
+    }
+    if (task.kind === 'genesis') {
+      // Genesis (MCP only): depth pass, relight or depth effect. The code lives in the Genesis lane.
+      if (task.outputAssetId) return {};
+      if (!task.genesis || asset.kind !== 'video') throw new AnalysisError('The Genesis job is unavailable.', 400);
+      const work = task.genesis, label = work.job === 'depth' ? 'Estimating depth (VDA-Small)' : work.job === 'relight' ? 'Relighting (LightX)' : 'Compositing depth effect';
+      const { file, result } = await runPhase(label, () => runGenesisJob(source, directory, work, convexUrl, signal, onProgress));
+      const suffix = work.job === 'depth' ? ' (depth)' : work.job === 'relight' ? ' (relit)' : ` (${String((work.params as { effect?: string }).effect ?? 'depth effect')})`;
+      await runPhase('Saving Genesis result', () => uploadMediaFile(file.path, { ...credentials, projectId: task.projectId, fileName: `${asset.fileName.replace(/\.[^.]+$/, '').slice(0, 200)}${suffix}.mp4`, kind: 'video', contentType: 'video/mp4', width: file.width, height: file.height, duration: file.duration }, uploadContext, signal));
+      onProgress(98);
+      return { genesis: result };
     }
     if (task.kind === 'read') {
       if (!['video', 'image'].includes(asset.kind) || !task.read) throw new AnalysisError('Reading frames needs a video or image and a window.', 400);

@@ -10,7 +10,7 @@ export type Applied = { timeline: Timeline; baseClipId: string; clipIds: string[
 export function baseClip(timeline: Timeline, layer: ReadyLayer, clipId = layer.clipId): Clip {
   const clip = timeline.clips.find(item => item.id === clipId);
   if (!clip) throw new Error(`Clip ${clipId} is not on this timeline. Pass clipId of the footage clip that shows the layer's subject.`);
-  if (clip.kind !== 'video' || clip.assetId !== layer.sourceAssetId) throw new Error(`Layer ${layer.layerId} was segmented from other footage. Choose a video clip of the same source, or segment this clip.`);
+  if (clip.kind !== 'video' || clip.assetId !== layer.sourceAssetId) throw new Error(`Layer ${layer.layerId} was segmented from other footage, or the clip shows a relight or depth effect (layer functions would stack the original subject over it). Use the original footage clip, or depthEffect with keepLayerId.`);
   const frame = 1 / layer.fps;
   if (clip.sourceStart < layer.start - frame || sourceEndOf(clip) > layer.end + frame)
     throw new Error(`Layer ${layer.layerId} masks source ${layer.start.toFixed(2)}–${layer.end.toFixed(2)}s but clip ${clip.id} plays ${clip.sourceStart.toFixed(2)}–${sourceEndOf(clip).toFixed(2)}s. Split the clip at the layer's range, or segment the whole clip.`);

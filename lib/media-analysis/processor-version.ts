@@ -19,4 +19,5 @@
 // 51: MCP subject selections and noun grounding can request SAM 3.1 on Meta's Model API.
 // 52: SAM 3.1 cut-outs report the subject's box per frame (Genesis layers).
 // 53: those boxes are measured from the mask's opaque pixels, so they always match the cut-out.
-export const MEDIA_PROCESSOR_VERSION = 53;
+// 54: Genesis jobs: VDA-Small depth passes, LightX relight and depth effects (genesis task kind).
+export const MEDIA_PROCESSOR_VERSION = 54;

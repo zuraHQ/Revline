@@ -31,6 +31,17 @@ export type LaneCheckContext = {
   referenceMotion?: ReferenceMotionEvidence[];
   /** Genesis layers of this project, read by the server for the genesis lane's checks. */
   genesis?: GenesisLayerEvidence[];
+  /** Applied Genesis relights and depth effects of this project, for the same checks. */
+  genesisJobs?: GenesisJobEvidence[];
+};
+/** One relight or depth-effect result and the clips it was applied to. */
+export type GenesisJobEvidence = {
+  jobId: string;
+  kind: string;
+  outputAssetId: string;
+  start: number;
+  end: number;
+  applications: { timelineId: string; clipId: string }[];
 };
 /** One SAM 3.1 layer and where Genesis functions placed it. Boxes are per mask frame, normalized [l,t,r,b] or null. */
 export type GenesisLayerEvidence = {

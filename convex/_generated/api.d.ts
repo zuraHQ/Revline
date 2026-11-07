@@ -44,6 +44,7 @@ import type * as filmDrafts from "../filmDrafts.js";
 import type * as frameCache from "../frameCache.js";
 import type * as generatedImages from "../generatedImages.js";
 import type * as genesis from "../genesis.js";
+import type * as genesisJobs from "../genesisJobs.js";
 import type * as http from "../http.js";
 import type * as iconCache from "../iconCache.js";
 import type * as icons from "../icons.js";
@@ -198,6 +199,7 @@ declare const fullApi: ApiFromModules<{
   frameCache: typeof frameCache;
   generatedImages: typeof generatedImages;
   genesis: typeof genesis;
+  genesisJobs: typeof genesisJobs;
   http: typeof http;
   iconCache: typeof iconCache;
   icons: typeof icons;

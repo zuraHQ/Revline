@@ -104,6 +104,16 @@ export function review(context: LaneCheckContext): { failures: string[]; warning
       }
     }
   }
+  // Relights and depth effects: the clip still plays inside the processed source range.
+  for (const job of context.genesisJobs ?? []) {
+    for (const use of job.applications.filter(use => use.timelineId === context.timelineId)) {
+      const clip = clips.get(use.clipId);
+      if (!clip || clip.assetId !== job.outputAssetId) continue;
+      const frame = 1 / context.timeline.fps, from = clip.sourceStart, to = sourceEndOf(clip);
+      if (from < job.start - frame || to > job.end + frame) { failures.push(`${job.kind} ${job.jobId}: clip ${clip.id} plays source ${range(from, to)} but the result covers only ${range(job.start, job.end)}. Trim the clip back, or undo and run the job on the new range.`); continue; }
+      spans.push({ start: clip.start, end: clip.start + clip.duration });
+    }
+  }
   if (!spans.length) return { failures, warnings };
   // Frames read at the current timeline fingerprint were taken after the last edit, Genesis included.
   const seen = currentEvidence(context, 'getFrames').flatMap(item => Array.isArray(item.input.times) ? item.input.times.filter((time): time is number => typeof time === 'number') : []);

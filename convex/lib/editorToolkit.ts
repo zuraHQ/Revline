@@ -6,6 +6,11 @@ import { getLayerDescription, getLayerInput, segmentDescription, segmentInput, s
 import { applyLayerEffect, layerEffectDescription, layerEffectInput } from '../../lib/ai/lanes/genesis/functions/layer-effect';
 import { applyTextBehind, textBehindDescription, textBehindInput } from '../../lib/ai/lanes/genesis/functions/text-behind';
 import type { Applied } from '../../lib/ai/lanes/genesis/functions/layer';
+import { applyJobDescription, applyJobInput, depthDescription, depthEffectDescription, depthEffectInput, depthInput, effectLayers, effectParams, getJobDescription, getJobInput } from '../../lib/ai/lanes/genesis/functions/depth';
+import { relightDescription, relightInput } from '../../lib/ai/lanes/genesis/functions/relight';
+import { lightPlan } from '../../lib/ai/lanes/genesis/functions/light';
+import { DEPTH_MODEL, EXPLICIT_LIGHT_MODE } from '../../lib/ai/lanes/genesis/config';
+import type { RelightParams } from '../../lib/ai/lanes/genesis/job';
 import { LANE_IDS } from '../../lib/ai/lanes/types';
 import { timelineHistoryKey } from '../../lib/editor/timeline-history-key';
 import { laneBaseline } from '../../lib/ai/lanes/task';
@@ -538,6 +543,13 @@ export function createEditorToolkit(ctx: ActionCtx, options: EditorToolkitOption
     return { ...saved, layerId: layer.layerId, footageClipId: placed.baseClipId, clipIds: placed.clipIds, subjectClipIds: placed.subjectClipIds, next: `getFrames at ${mid}s (and where the subject moves fastest), then finish.` };
   };
   const readyLayer = (layerId: string) => ctx.runQuery(internal.genesis.readyForRun, { ...run, layerId });
+  /** Genesis jobs read a footage clip's source range (on its own clock) and change only its media when applied. */
+  const genesisFootage = async (clipId: string) => { await editSession.wait(); const clip = find(editSession.timeline, clipId); if (clip.kind !== 'video' || !clip.assetId) throw new Error('Choose a video footage clip.'); return clip; };
+  const startGenesisJob = (kind: 'depth' | 'relight' | 'effect', clip: Clip, params: unknown, layerIds: string[], depthId?: string) => {
+    const a = clip.sourceStart, b = sourceEndOf(clip);
+    return ctx.runMutation(internal.genesisJobs.startFromRun, { ...run, kind, clipId: clip.id, assetId: clip.assetId!, start: Math.min(a, b), end: Math.max(a, b), params, layerIds, ...(depthId ? { depthId } : {}) });
+  };
+  const pollJob = (status: string) => status === 'ready' ? undefined : 'Poll getJob with this jobId every 15-30 seconds until ready.';
   const pixelSeedInput = z.union([trackSeed, z.object({ kind: z.literal('object'), noun: z.string().trim().min(1).max(120) }).strict(), z.object({ kind: z.literal('target'), targetId: z.string().min(1) }).strict()]);
   const resolveSubjectSeed = (seed:z.infer<typeof pixelSeedInput>,assetId:string|undefined,time:number):PixelTrackRequest['seed'] => {
     if(seed.kind!=='target')return seed;
@@ -2274,6 +2286,43 @@ export function createEditorToolkit(ctx: ActionCtx, options: EditorToolkitOption
     getLayer: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.getLayer, description: getLayerDescription, inputSchema: getLayerInput, execute: async (_ctx, {layerId, from, to}) => ctx.runQuery(internal.genesis.layerForRun, { ...run, layerId, ...(from !== undefined ? { from } : {}), ...(to !== undefined ? { to } : {}) }) }),
     layerEffect: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.layerEffect, description: layerEffectDescription, inputSchema: layerEffectInput, execute: async (_ctx, input) => applyGenesis(input.layerId, input.clipId, `layerEffect:${input.effect}`, (t, layer, stack) => applyLayerEffect(t, layer, stack, input, () => crypto.randomUUID())) }),
     textBehind: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.textBehind, description: textBehindDescription, inputSchema: textBehindInput, execute: async (_ctx, input) => applyGenesis(input.layerId, input.clipId, 'textBehind', (t, layer, stack) => applyTextBehind(t, layer, stack, input, () => crypto.randomUUID())) }),
+    depth: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.depth, description: depthDescription, inputSchema: depthInput, execute: async (_ctx, input) => {
+      const started = await startGenesisJob('depth', await genesisFootage(input.clipId), {}, []);
+      return { ...started, model: `Video Depth Anything ${DEPTH_MODEL}`, license: 'Apache-2.0', provider: 'fal', next: pollJob(started.status) ?? 'Pass this jobId as depthId to depthEffect or relight.' };
+    } }),
+    relight: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.relight, description: relightDescription, inputSchema: relightInput, execute: async (_ctx, input) => {
+      if (input.layerId && !input.depthId) throw new Error('Subject relight needs depthId so the light falls off into the scene: run depth on this clip (reused by depth effects), poll getJob until ready, then relight with layerId and depthId.');
+      if (input.depthId && !input.layerId) throw new Error('depthId is for subject relight. Pass layerId too, or omit depthId to relight the whole frame.');
+      if (!input.layerId && input.falloff !== undefined) throw new Error('falloff applies to subject relight only.');
+      const clip = await genesisFootage(input.clipId), plan = lightPlan(input.light, EXPLICIT_LIGHT_MODE);
+      const params: RelightParams = { plan, scope: input.layerId ? 'subject' : 'frame', ...(input.layerId ? { layerId: input.layerId } : {}), strength: input.strength ?? 1, falloff: input.layerId ? input.falloff ?? .35 : 0, seed: input.seed ?? 7 };
+      const started = await startGenesisJob('relight', clip, params, input.layerId ? [input.layerId] : [], input.depthId);
+      return { ...started, model: 'LightX relight', provider: 'fal', mode: plan.mode, light: plan.label, scope: params.scope, next: pollJob(started.status) ?? 'applyJob with this jobId.' };
+    } }),
+    depthEffect: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.depthEffect, description: depthEffectDescription, inputSchema: depthEffectInput, execute: async (_ctx, input) => {
+      const clip = await genesisFootage(input.clipId), end = clip.start + clip.duration;
+      for (const time of [input.start, input.end]) if (time !== undefined && (time < clip.start - 1e-6 || time > end + 1e-6)) throw new Error(`Keep start/end inside clip ${clip.id} (${clip.start.toFixed(2)}–${end.toFixed(2)}s).`);
+      const a = clip.sourceStart, b = sourceEndOf(clip);
+      const params = effectParams(input, time => sourceTimeAt(clip, time), { start: Math.min(a, b), end: Math.max(a, b) });
+      const started = await startGenesisJob('effect', clip, params, effectLayers(params), input.depthId);
+      return { ...started, compositor: 'Genesis depth compositor (media worker, no model cost)', next: pollJob(started.status) ?? 'applyJob with this jobId.' };
+    } }),
+    getJob: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.getJob, description: getJobDescription, inputSchema: getJobInput, execute: async (_ctx, { jobId }) => ctx.runQuery(internal.genesisJobs.jobForRun, { ...run, jobId }) }),
+    applyJob: createTool({ metadata: EDITOR_TOOL_DEFINITIONS.applyJob, description: applyJobDescription, inputSchema: applyJobInput, execute: async (_ctx, input) => {
+      const job = await ctx.runQuery(internal.genesisJobs.readyForApply, { ...run, jobId: input.jobId });
+      const clip = await genesisFootage(input.clipId ?? job.clipId), frame = 1 / editSession.timeline.fps;
+      if (clip.assetId === job.outputAssetId) throw new Error(`Clip ${clip.id} already shows this result.`);
+      if (clip.assetId !== job.sourceAssetId) throw new Error(`Clip ${clip.id} no longer shows the footage this job processed. Run the job again on this clip.`);
+      // Layer functions stack copies of the original footage and subject over the clip; a new base would hide under them.
+      const stack = await ctx.runQuery(internal.genesis.stackForRun, { ...run, timelineId: timelineIdForLane(), baseClipId: clip.id });
+      if (stack.clipIds.some(id => editSession.timeline.clips.some(other => other.id === id))) throw new Error(`Clip ${clip.id} has layer functions (layerEffect/textBehind) stacked on it, built from the original footage. Undo them, applyJob, then use depthEffect keepLayerId for subject-aware looks.`);
+      if (clip.sourceStart < job.start - frame || sourceEndOf(clip) > job.end + frame) throw new Error(`The job covers source ${job.start.toFixed(2)}–${job.end.toFixed(2)}s but clip ${clip.id} plays ${clip.sourceStart.toFixed(2)}–${sourceEndOf(clip).toFixed(2)}s. Trim the clip back or run the job again.`);
+      await adoptAsset(job.outputAssetId);
+      const saved = await checkpoint(t => patchClip(t, clip.id, { assetId: job.outputAssetId }));
+      await ctx.runMutation(internal.genesisJobs.recordApplication, { ...run, jobId: job.jobId, timelineId: timelineIdForLane(), clipId: clip.id });
+      const mid = Math.round((clip.start + clip.duration / 2) * 100) / 100;
+      return { ...saved, jobId: job.jobId, clipId: clip.id, assetId: job.outputAssetId, undo: 'undoLatestEdit restores the original footage.', next: `getFrames at ${mid}s with resolution 1080 (plus the start and end of the clip), then finish.` };
+    } }),
   };
   // Scenes report what they cover but were never read: a recreation reads every moment before building over it.
   // Building is refused while the range still owes reads, unless the call says why it goes ahead (readReason).

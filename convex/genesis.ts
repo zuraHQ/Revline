@@ -17,17 +17,17 @@ import { MAX_LAYER_BOXES } from '../lib/ai/lanes/genesis/functions/segment';
 const HANDLE_SECONDS = .25, MAX_SECONDS = 120;
 const box = v.array(v.number());
 const application = v.object({ timelineId: v.string(), function: v.string(), baseClipId: v.string(), clipIds: v.array(v.string()), subjectClipIds: v.array(v.string()) });
-const layerStatus = (cutout: Doc<'cutouts'> | null) => !cutout || cutout.status === 'failed' ? 'failed' as const : cutout.status === 'completed' && cutout.outputAssetId ? 'ready' as const : 'processing' as const;
+export const layerStatus = (cutout: Doc<'cutouts'> | null) => !cutout || cutout.status === 'failed' ? 'failed' as const : cutout.status === 'completed' && cutout.outputAssetId ? 'ready' as const : 'processing' as const;
 // Upper bound before the worker reads the source rate: it never sends more frames than the timeline plays.
 const usd = (seconds: number, fps: number, noun: boolean) => sam31Usd(Math.ceil(seconds * fps), noun);
 
-async function requireMcpRun(ctx: QueryCtx | MutationCtx, args: { projectId: Id<'projects'>; ownerId: string; runId: string }, exclusive: boolean) {
+export async function requireMcpRun(ctx: QueryCtx | MutationCtx, args: { projectId: Id<'projects'>; ownerId: string; runId: string }, exclusive: boolean) {
   if (!isMcpRun(args.runId)) throw new ConvexError('Genesis is available to MCP clients only.');
   const project = await readProject(ctx, args.projectId);
   if (!project || project.ownerId !== args.ownerId || exclusive && !holdsRun(project, args.runId)) throw new ConvexError('AI run is no longer active');
   return project;
 }
-async function ownedLayer(ctx: QueryCtx | MutationCtx, args: { projectId: Id<'projects'>; ownerId: string }, layerId: string) {
+export async function ownedLayer(ctx: QueryCtx | MutationCtx, args: { projectId: Id<'projects'>; ownerId: string }, layerId: string) {
   const id = ctx.db.normalizeId('genesisLayers', layerId), layer = id ? await ctx.db.get(id) : null;
   if (!layer || layer.ownerId !== args.ownerId || layer.projectId !== args.projectId) throw new ConvexError('Layer not found in this project. Use the layerId segment returned.');
   return layer;
@@ -39,7 +39,9 @@ export const startFromRun = internalMutation({
   handler: async (ctx, args) => {
     const project = await requireMcpRun(ctx, args, true);
     await requireEditorAccess(ctx, args.ownerId);
-    const assetId = ctx.db.normalizeId('assets', args.sourceAssetId), asset = assetId ? await ctx.db.get(assetId) : null;
+    const assetId = ctx.db.normalizeId('assets', args.sourceAssetId), shown = assetId ? await ctx.db.get(assetId) : null;
+    // A clip showing a Genesis relight or depth effect is segmented on its original footage (same source clock).
+    const asset = shown?.derivedOf && !shown.derivation ? await ctx.db.get(shown.derivedOf) : shown;
     if (!asset || asset.ownerId !== args.ownerId || asset.projectId !== project._id || asset.kind !== 'video' || !asset.duration) throw new ConvexError('This clip’s video is unavailable.');
     if (asset.cutoutOf) throw new ConvexError('This clip already shows a cut-out. Segment the original footage.');
     let selection;

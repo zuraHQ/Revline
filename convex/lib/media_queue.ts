@@ -13,12 +13,13 @@ import { hasPreview, PREVIEW_VERSION } from './media_storage';
 import { hostedRendersEnabled } from './render_seats';
 import { BEAT_ANALYSIS_ENGINE } from '../../lib/media-analysis/beat-map';
 import { MEDIA_PROCESSOR_VERSION } from '../../lib/media-analysis/processor-version';
+import { failJob as failGenesisJob } from '../genesisJobs';
 
 /** The oldest media processor that can run each kind; older processors leave these tasks queued. */
 // Rendered work shares the current clipping, montage VFX and streamed tracking contract.
 const MIN_PROCESSOR_VERSION: Partial<Record<Doc<'mediaTasks'>['kind'], number>> = { highlights:MEDIA_PROCESSOR_VERSION,beats:MEDIA_PROCESSOR_VERSION,import:MEDIA_PROCESSOR_VERSION, facecam:MEDIA_PROCESSOR_VERSION, speakers:MEDIA_PROCESSOR_VERSION, transcribe: MEDIA_PROCESSOR_VERSION, frames: 4, preview:MEDIA_PROCESSOR_VERSION, cutout: MEDIA_PROCESSOR_VERSION, derive: 9, render: MEDIA_PROCESSOR_VERSION, review: MEDIA_PROCESSOR_VERSION, snapshot: MEDIA_PROCESSOR_VERSION, blueprint: 11, reference: 12, read: MEDIA_PROCESSOR_VERSION };
 
-export async function enqueueMediaTask(ctx: MutationCtx, input: Pick<Doc<'mediaTasks'>, 'ownerId' | 'projectId' | 'kind'> & Partial<Pick<Doc<'mediaTasks'>, 'assetId' | 'renderJobId' | 'analysisRequestId' | 'sourceUrl' | 'importRange' | 'sourcesOnly' | 'frameRequest' | 'videoRequest' | 'highlightSourceType' | 'highlightSkipGemini' | 'speakerRequest' | 'reviewId' | 'snapshotId' | 'readId' | 'blueprintCheckId' | 'cutoutId' | 'derivationId' | 'requiredProcessorVersion'|'previewVersion'|'lane'>>, beforeEnqueue?:()=>Promise<void>, waitForCapacity = false): Promise<Id<'mediaTasks'>> {
+export async function enqueueMediaTask(ctx: MutationCtx, input: Pick<Doc<'mediaTasks'>, 'ownerId' | 'projectId' | 'kind'> & Partial<Pick<Doc<'mediaTasks'>, 'assetId' | 'renderJobId' | 'analysisRequestId' | 'sourceUrl' | 'importRange' | 'sourcesOnly' | 'frameRequest' | 'videoRequest' | 'highlightSourceType' | 'highlightSkipGemini' | 'speakerRequest' | 'reviewId' | 'snapshotId' | 'readId' | 'blueprintCheckId' | 'cutoutId' | 'derivationId' | 'genesisJobId' | 'requiredProcessorVersion'|'previewVersion'|'lane'>>, beforeEnqueue?:()=>Promise<void>, waitForCapacity = false): Promise<Id<'mediaTasks'>> {
   const minimum = usesGemini(input.kind) ? MEDIA_PROCESSOR_VERSION : MIN_PROCESSOR_VERSION[input.kind];
   if (minimum) input = { ...input, requiredProcessorVersion: Math.max(minimum, input.requiredProcessorVersion ?? 0) };
   if(input.kind==='preview')input={...input,previewVersion:PREVIEW_VERSION};
@@ -35,7 +36,7 @@ export async function enqueueMediaTask(ctx: MutationCtx, input: Pick<Doc<'mediaT
     }
   }
   // Each frame read, cut-out and derivation is its own request with its own result row: parallel ones on one asset each get a task.
-  if (input.assetId && input.kind !== 'speakers' && input.kind !== 'frames' && input.kind !== 'video' && input.kind !== 'cutout' && input.kind !== 'derive' && input.kind !== 'read') {
+  if (input.assetId && input.kind !== 'speakers' && input.kind !== 'frames' && input.kind !== 'video' && input.kind !== 'cutout' && input.kind !== 'derive' && input.kind !== 'read' && input.kind !== 'genesis') {
     const existing = await ctx.db.query('mediaTasks').withIndex('by_asset_kind', q => q.eq('assetId', input.assetId).eq('kind', input.kind)).order('desc').take(10);
     const active = existing.find(task => (input.kind!=='preview'||task.previewVersion===input.previewVersion)&&['queued','running','retrying'].includes(task.status));
     if(active&&input.kind==='preview'&&(active.requiredProcessorVersion??0)<(input.requiredProcessorVersion??0))await cancelMediaTask(ctx,active._id);
@@ -108,6 +109,7 @@ export async function markTerminal(ctx: MutationCtx, taskId: Id<'mediaTasks'>, s
   if(task.blueprintCheckId){const check=await ctx.db.get(task.blueprintCheckId);if(check&&check.status==='queued')await ctx.db.patch(check._id,{status:'failed',error:error.slice(0,1000)});}
   if(task.cutoutId){const cutout=await ctx.db.get(task.cutoutId);if(cutout&&cutout.status==='queued')await ctx.db.patch(cutout._id,{status:'failed',error:error.slice(0,1000)});}
   if(task.derivationId){const row=await ctx.db.get(task.derivationId);if(row&&row.status==='queued')await ctx.db.patch(row._id,{status:'failed',error:error.slice(0,1000)});}
+  if(task.genesisJobId)await failGenesisJob(ctx,task,error);
   if (task.analysisRequestId) {
     const request = await ctx.db.get(task.analysisRequestId);
     if (request) await ctx.db.patch(request._id, { status: 'failed', error: error.slice(0, 1000) });

@@ -20,7 +20,7 @@ const mutations = new Set([
   'assistant:attachRunStockAudio', 'assistant:reserveAudioRequest', 'assistant:saveGeneratedSound', 'assistant:importRunVideo', 'assistant:exportRunVideo',
   'blueprints:requestCheck', 'blueprints:saveFromCheck', 'brandKits:create', 'brandKits:update',
   'compositionReview:savePlan', 'compositionReview:request', 'compositionReview:cancel',
-  'cutouts:startFromRun', 'derivations:startFromRun', 'genesis:startFromRun', 'genesis:recordApplication',
+  'cutouts:startFromRun', 'derivations:startFromRun', 'genesis:startFromRun', 'genesis:recordApplication', 'genesisJobs:startFromRun', 'genesisJobs:recordApplication',
   'mcp:requestFrames', 'mcp:requestGuard', 'mcp:discardFrames', 'mcp:takeFrames',
   'briefs:update', 'memories:remember', 'memories:forget',
   'referenceReads:request', 'referenceReads:take', 'referenceReads:discard',

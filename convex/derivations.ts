@@ -37,7 +37,7 @@ export async function startDerivation(ctx: MutationCtx, input: StartInput) {
   if (!project || project.ownerId !== input.ownerId || project.deleting) throw new ConvexError('Project not found.');
   const id = ctx.db.normalizeId('assets', input.assetId), asset = id ? await ctx.db.get(id) : null;
   if (!asset || asset.ownerId !== input.ownerId || asset.projectId !== project._id) throw new ConvexError('This clip’s media is unavailable.');
-  if ((input.op === 'slowmo' || input.op === 'upscale') && asset.derivedOf && asset.derivation !== 'freeze') throw new ConvexError(`This clip already uses ${asset.derivation === 'slowmo' ? 'smooth slow-motion' : 'upscaled'} footage. Process the original instead.`);
+  if ((input.op === 'slowmo' || input.op === 'upscale') && asset.derivedOf && asset.derivation !== 'freeze') throw new ConvexError(`This clip already uses ${asset.derivation === 'slowmo' ? 'smooth slow-motion' : asset.derivation === 'upscale' ? 'upscaled' : 'processed (Genesis)'} footage. Process the original instead.`);
   if (input.op === 'parallax' && asset.kind === 'audio') throw new ConvexError('Parallax needs a video or image.');
   if (input.op === 'parallax' && input.placeLater) throw new ConvexError('Parallax atlases must be placed with their renderer.');
   if (input.op === 'freeze' && asset.kind !== 'video') throw new ConvexError('Freeze a video clip.');

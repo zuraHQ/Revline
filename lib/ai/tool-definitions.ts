@@ -183,6 +183,11 @@ export const EDITOR_TOOL_DEFINITIONS = {
   getLayer: { effect: 'read', mcp: 'read' },
   layerEffect: { effect: 'timeline', mcp: 'exclusive', label: ['Applying a layer effect', 'Applied a layer effect'] },
   textBehind: { effect: 'timeline', mcp: 'exclusive', label: ['Placing text behind the subject', 'Placed text behind the subject'] },
+  depth: { effect: 'job', mcp: 'exclusive', writes: ['genesisJobs:startFromRun'], label: ['Estimating depth', 'Started a depth pass'] },
+  depthEffect: { effect: 'job', mcp: 'exclusive', writes: ['genesisJobs:startFromRun'], label: ['Starting a depth effect', 'Started a depth effect'] },
+  relight: { effect: 'job', mcp: 'exclusive', writes: ['genesisJobs:startFromRun'], label: ['Relighting', 'Started relighting'] },
+  getJob: { effect: 'read', mcp: 'read' },
+  applyJob: { effect: 'timeline', mcp: 'exclusive', label: ['Applying a Genesis result', 'Applied a Genesis result'] },
 } as const satisfies Record<string, ToolBehavior>;
 
 export type EditorToolName = keyof typeof EDITOR_TOOL_DEFINITIONS;
