@@ -1,0 +1,12 @@
+{
+  "name": "revline-mcp",
+  "private": true,
+  "description": "Revline's public MCP server and OAuth provider on Cloudflare. The MCP SDK v2 packages are agents/mcp's peers; zod resolves from the app's root node_modules.",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/server": "2.3.1",
+    "agents": "0.31.0"
+  }
+}

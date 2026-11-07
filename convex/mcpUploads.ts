@@ -12,6 +12,7 @@ import { mediaConfig } from './lib/media_storage';
 import { openUpload, signPartUrl } from './r2';
 import { signMediaToken, verifyMediaToken } from '../lib/storage/media-tokens';
 import { localUploadScript } from '../lib/storage/local-upload-script';
+import { publicMcpOrigin } from './lib/mcp_origin';
 
 const metadataInput = z.object({ size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), width: z.number().int().min(1).max(16384).optional(), height: z.number().int().min(1).max(16384).optional(), duration: z.number().positive().optional() }).strict();
 const uploadScope = z.object({ ownerId: z.string().min(1), projectId: z.string().min(1), fileName: z.string().trim().min(1).max(255), contentType: z.string().regex(/^(?:(video|image|audio)\/[\w.+-]+|model\/gltf-binary)$/) });
@@ -27,7 +28,7 @@ export function mediaKind(contentType: string) {
 /** Prepares multipart media uploads or a scoped native upload for small GLB models. */
 async function prepareLocalUpload(ctx: ActionCtx, scope: UploadScope, metadata: z.infer<typeof metadataInput>) {
   const kind = mediaKind(scope.contentType);
-  if (kind === 'model') return { modelUploadUrl: await ctx.runMutation(internal.mcpUploads.modelUploadUrl, { ownerId: scope.ownerId, projectId: scope.projectId as Id<'projects'> }) };
+  if (kind === 'model') return { modelUploadUrl: publicUploadUrl(await ctx.runMutation(internal.mcpUploads.modelUploadUrl, { ownerId: scope.ownerId, projectId: scope.projectId as Id<'projects'> })) };
   if (kind !== 'image' && !metadata.duration) throw new Error('This media has no readable duration.');
   const upload = await openUpload(ctx, { projectId: scope.projectId as Id<'projects'>, fileName: scope.fileName, contentType: scope.contentType, kind, ...metadata }, scope.ownerId);
   const lease = await ctx.runQuery(internal.r2.getLease, { uploadId: upload.uploadId, ownerId: scope.ownerId });
@@ -35,10 +36,17 @@ async function prepareLocalUpload(ctx: ActionCtx, scope: UploadScope, metadata: 
   return { ...upload, urls };
 }
 
+/** The ticketed /uploads URL under the MCP server's public address (/mcp/upload/model), so agents only see Revline's own domain. */
+function publicUploadUrl(url: string) {
+  const ticket = new URL(url).searchParams.get('ticket') ?? '';
+  return `${publicMcpOrigin()}/mcp/upload/model?ticket=${encodeURIComponent(ticket)}`;
+}
+
 export async function startLocalUpload(ctx: ActionCtx, scope: UploadScope, filePath: string) {
   const kind = mediaKind(scope.contentType), projectId = scope.projectId as Id<'projects'>;
   await ctx.runQuery(internal.r2.authorize, { ownerId: scope.ownerId, projectId, kind, contentType: scope.contentType });
-  const site = process.env.CONVEX_SITE_URL;
+  // The public MCP address (tryrevline.com in production), never the deployment's *.convex.site URL.
+  const site = publicMcpOrigin();
   if (!site) throw new Error('Upload endpoint is not configured.');
   const { secret } = mediaConfig();
   const token = await signMediaToken(secret, { operation: 'prepareUpload', upload: scope, expires: Date.now() + 3600_000 });

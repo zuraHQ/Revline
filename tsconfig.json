@@ -43,6 +43,7 @@
     ".data",
     "infra/media-worker/edge",
     "cloudflare/agent-runner",
+    "cloudflare/mcp",
     "mobile/superwall"
   ]
 }

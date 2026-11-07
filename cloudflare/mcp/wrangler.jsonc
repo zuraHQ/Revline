@@ -1,0 +1,27 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  // Development MCP server for the dev Convex deployment (majestic-alpaca-541), on workers.dev only.
+  // Production: wrangler.production.jsonc. Local: npm run dev:mcp (wrangler dev against this config).
+  "name": "revline-mcp-dev",
+  "main": "worker.ts",
+  "account_id": "701645e913477e567db69b11343f59d8",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  // One Agents SDK McpAgent (a SQLite Durable Object) per MCP session.
+  "durable_objects": { "bindings": [{ "name": "MCP_SESSION", "class_name": "RevlineMcp" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RevlineMcp"] }],
+  // The OAuth provider's clients, grants and tokens (hashed). Created on first deploy.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+  // Dynamic client registrations per client IP, as the Convex server limited them.
+  "ratelimits": [{ "name": "REGISTER_LIMIT", "namespace_id": "4101", "simple": { "limit": 10, "period": 60 } }],
+  "vars": {
+    "CONVEX_SITE_URL": "https://majestic-alpaca-541.convex.site",
+    // The address clients connect to; every token is bound to <MCP_ORIGIN>/mcp.
+    "MCP_ORIGIN": "https://revline-mcp-dev.makaradze98-s.workers.dev",
+    // Where the signed-in consent page (/connect) lives.
+    "APP_ORIGIN": "http://localhost:3001"
+  },
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false }, "traces": { "enabled": true, "head_sampling_rate": 1, "persist": true } }
+}

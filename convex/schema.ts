@@ -427,8 +427,9 @@ export default defineSchema({
   // A redeemed code stays as a tombstone naming its grant, so a replayed code can revoke it.
   mcpAuthCodes: defineTable({ codeHash: v.string(), clientId: v.string(), ownerId: v.string(), redirectUri: v.string(), codeChallenge: v.string(), resource: v.optional(v.string()), expiresAt: v.number(), redeemedGrantId: v.optional(v.string()) }).index("by_codeHash", ["codeHash"]).index("by_expiresAt", ["expiresAt"]),
   mcpTokens: defineTable({
-    tokenHash: v.string(), kind: v.union(v.literal("access"), v.literal("refresh"), v.literal("personal")), ownerId: v.string(),
-    // One connection (an approved client, or one personal token) shares a grant.
+    tokenHash: v.string(), kind: v.union(v.literal("access"), v.literal("refresh"), v.literal("personal"), v.literal("grant")), ownerId: v.string(),
+    // One connection (an approved client, or one personal token) shares a grant. A "grant" row is the Convex half of a
+    // connection approved through the Cloudflare MCP server's OAuth provider: its key is held only by that Worker.
     grantId: v.string(), clientId: v.optional(v.string()), label: v.string(),
     createdAt: v.number(), expiresAt: v.optional(v.number()), lastUsedAt: v.optional(v.number()), revokedAt: v.optional(v.number()),
   }).index("by_tokenHash", ["tokenHash"]).index("by_owner", ["ownerId"]).index("by_owner_revoked", ["ownerId", "revokedAt"]).index("by_grant", ["grantId"]).index("by_grant_revoked", ["grantId", "revokedAt"]).index("by_clientId", ["clientId"]).index("by_revokedAt", ["revokedAt"]),

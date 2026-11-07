@@ -12,7 +12,19 @@ import './workspace-pages.css';
 import './connect-page.css';
 import { Button } from '@/components/ui/button';
 
-export type ConnectRequest = { clientId?: string; redirectUri?: string; codeChallenge?: string; codeChallengeMethod?: string; state?: string; resource?: string };
+/** A Convex OAuth request (older connections), or a consent `handle` from the Cloudflare MCP server (cloudflare/mcp). */
+export type ConnectRequest = { clientId?: string; redirectUri?: string; codeChallenge?: string; codeChallengeMethod?: string; state?: string; resource?: string; handle?: string; clientName?: string };
+
+/** The MCP server that started a handle's consent; its cookie is bound to that origin. Same origin in production. */
+const mcpOrigin = () => process.env.NEXT_PUBLIC_MCP_ORIGIN?.replace(/\/$/, '') || window.location.origin;
+
+/** Hands the decision back to the MCP server as a top-level form post, so its consent cookie comes along. */
+function postConsent(fields: Record<string, string>) {
+  const form = document.createElement('form');
+  form.method = 'POST'; form.action = `${mcpOrigin()}/oauth/authorize`;
+  for (const [name, value] of Object.entries(fields)) { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.appendChild(input); }
+  document.body.appendChild(form); form.submit(); form.remove();
+}
 
 /** Apps on this computer (Claude Code, Codex) take the code on a localhost callback page of their own. */
 const loopback = (uri: string) => ['localhost', '127.0.0.1', '[::1]'].includes(new URL(uri).hostname);
@@ -23,9 +35,14 @@ const permissions = ['See your projects, media and transcripts', 'Edit timelines
 export function ConnectPage({ request }: { request: ConnectRequest }) {
   const { isAuthenticated } = useConvexAuth();
   const { user } = useUser();
-  const complete = !!request.clientId && !!request.redirectUri && !!request.codeChallenge;
-  const details = useQuery(api.mcpAuth.authorizationRequest, isAuthenticated && complete ? { clientId: request.clientId!, redirectUri: request.redirectUri! } : 'skip');
+  const cloudflare = !!request.handle;
+  const complete = cloudflare ? !!request.redirectUri : !!request.clientId && !!request.redirectUri && !!request.codeChallenge;
+  const convexDetails = useQuery(api.mcpAuth.authorizationRequest, isAuthenticated && complete && !cloudflare ? { clientId: request.clientId!, redirectUri: request.redirectUri! } : 'skip');
+  const access = useQuery(api.mcpAuth.consentAccess, isAuthenticated && complete && cloudflare ? { redirectUri: request.redirectUri! } : 'skip');
+  // The client's name comes from its own registration either way; the MCP server holds the request itself.
+  const details = cloudflare ? access && (access.ok ? { ...access, clientName: request.clientName?.slice(0, 100) || 'MCP client' } : access) : convexDetails;
   const approve = useMutation(api.mcpAuth.approve);
+  const approveConsent = useMutation(api.mcpAuth.approveConsent);
   const [busy, setBusy] = useState<'approve' | 'cancel' | ''>('');
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
@@ -38,9 +55,15 @@ export function ConnectPage({ request }: { request: ConnectRequest }) {
     setBusy('approve'); setError('');
     // A local app's callback opens in a small window that closes itself, so this page can show the result.
     // Opened before the await so the click still counts and the popup isn't blocked.
-    const local = loopback(request.redirectUri!);
+    // A Cloudflare consent goes back as a top-level post, so the MCP server's own page reports any failure.
+    const local = !cloudflare && loopback(request.redirectUri!);
     const handoff = local ? window.open('about:blank', 'revline-connect', 'popup,width=420,height=320') : null;
     try {
+      if (cloudflare) {
+        const { approval } = await approveConsent({ handle: request.handle! });
+        postConsent({ handle: request.handle!, decision: 'approve', approval });
+        return;
+      }
       const { redirectTo } = await approve({ clientId: request.clientId!, redirectUri: request.redirectUri!, codeChallenge: request.codeChallenge!, codeChallengeMethod: request.codeChallengeMethod ?? '', ...(request.state !== undefined ? { state: request.state } : {}), ...(request.resource !== undefined ? { resource: request.resource } : {}) });
       setConnected(true);
       if (handoff) { handoff.location.href = redirectTo; window.setTimeout(() => handoff.close(), 2500); }
@@ -50,6 +73,7 @@ export function ConnectPage({ request }: { request: ConnectRequest }) {
   // Only a redirect address the server confirmed is registered for this app.
   function cancel() {
     setBusy('cancel');
+    if (cloudflare) { postConsent({ handle: request.handle!, decision: 'deny' }); return; }
     const target = new URL(request.redirectUri!);
     target.searchParams.set('error', 'access_denied');
     if (request.state !== undefined) target.searchParams.set('state', request.state);

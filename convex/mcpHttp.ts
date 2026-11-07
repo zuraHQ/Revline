@@ -5,10 +5,10 @@ import { CallToolRequestSchema, InitializeRequestSchema, ListResourcesRequestSch
 import { httpAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
-import { EDITOR_STYLE_RULES } from '../lib/ai/editor-style';
+import { MCP_INSTRUCTIONS } from '../lib/mcp/instructions';
 import { requestMcpOrigin } from './lib/mcp_origin';
 import { MCP_REFERENCE_COMPARISON_BUDGET_MS } from '../lib/ai/reference-comparison';
-import { BACKGROUND_PREVIEW_URI, MCP_APP_MIME, mcpAppDocument } from '../lib/editor/background-preview';
+import { listMcpResources, readMcpResource } from '../lib/mcp/resources';
 
 // Streamable HTTP MCP server (official MCP SDK, stateless JSON responses) plus
 // the OAuth 2.1 authorization server MCP clients discover from it.
@@ -21,20 +21,7 @@ const cors = {
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers } });
 
-export const MCP_INSTRUCTIONS = `Keep check-level, cost and method metadata in tool results. User-facing replies have zero "How it was made", check-level or cost footers; explain how or cost only when asked. Never approve finished work on the user’s behalf.
 
-Revline is a video editor. These tools edit the user's real Revline projects; each editing call is saved immediately, appears live in any open editor tab, and is undoable (undoLatestEdit, or Undo in the editor). History is kept: when the user wants back something they had ("bring back what we had", "it was better before"), call listRevisions, look at a revision with getFrames revision, then restoreSection (one section of a film, the rest stays as it is now) or restoreClip (one whole clip, keeping every later edit to the others). Never chain undoLatestEdit to reach an older version.
-
-Start with listProjects -> getProject -> startTask(projectId, timelineId, request, lane?, reason?, taskType?). Keep the returned taskId and pass it with projectId on subsequent tools. Alternatively pass projectId and timelineId on every call. Basic trims, captions, audio and timeline edits work without setLane. Style is optional. Use setLane only to change the primary deliverable. /clip and explicit user style remain authoritative.
-Use discoverCapabilities with the action you need, then loadCapability for supporting workflows or readSkill for a known skill/page. Load only relevant skills and tools. Supporting motion within a Clip task keeps that task and its clip delivery checks. tools/list is the full catalog and stays the same for the whole session. A tool tagged [Needs: …] runs once its lane is chosen or one of those capabilities is loaded; an earlier call returns the exact loadCapability step. Each call enforces owner, task and capability access.
-For a one-take short-form/reel rough cut, use reel by default unless the user chose another style. Clean false starts, accidental repeats, awkward pauses and abandoned takes while retaining natural delivery, intentional repeats and full meaning. Use saved transcript/audio first, then targeted visuals for awkward looks when needed. Let the retained message determine duration; no forced 30–60s, normalization or heavy full-film checks. Add minimal synchronized captions without a background unless the user declines captions or asks for a different style.
-inspectTimeline provides real clip/asset IDs. Use inspectAssetAnalysis for saved transcripts and clipping signals; getFrames provides rendered timeline evidence. Keep reference media off the timeline when recreating.
-The lane sets the checks; startTask and setLane return them. A final export or publish request, or an explicit request to double-check everything, runs the lane's full checks. Every editing task ends with finish. It runs real lane checks against the current timelines and saved evidence; do not report completion until passed:true. After three failures, stop and report the exact failures as unfinished work. setLane preserves failed attempts. Export only after explicit user confirmation.
-Use Revline’s tools to measure media; all tool edits save immediately and are undoable. Share the editorUrl from getProject.
-Act only through these tools. Never run Convex functions as a user (npx convex run … --identity, or functions called with someone's ownerId) to get around a missing tool or a refusal; report the gap with reportIssue and stop. To reuse media from another of the user's projects, use copyMedia.
-
-Editing quality rules:
-${EDITOR_STYLE_RULES}`;
 
 const oauthMetadata = (site: string) => ({
   issuer: site, authorization_endpoint: `${site}/oauth/authorize`, token_endpoint: `${site}/oauth/token`, registration_endpoint: `${site}/oauth/register`, revocation_endpoint: `${site}/oauth/revoke`,
@@ -49,12 +36,8 @@ const withCors = (response: Response) => { const headers = new Headers(response.
 /** The official MCP SDK speaks the protocol; Revline supplies auth, the tool list and tool calls. */
 function revlineServer(ctx: ActionCtx, ownerId: string, agentName: string, comparisonDeadline: number,connectionId?:string,agentClientId?:Id<'mcpConnections'>) {
   const server = new Server({ name: 'revline', title: 'Revline', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} }, instructions: MCP_INSTRUCTIONS });
-  // MCP Apps (io.modelcontextprotocol/ui, 2026-01-26): previewBackgrounds names this view in its tool _meta.ui.resourceUri.
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [{ uri: BACKGROUND_PREVIEW_URI, name: 'background_previews', title: 'Background candidates', description: 'Inline picker for previewBackgrounds results.', mimeType: MCP_APP_MIME }] }));
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    if (request.params.uri !== BACKGROUND_PREVIEW_URI) throw new Error(`Unknown resource ${request.params.uri}.`);
-    return { contents: [{ uri: BACKGROUND_PREVIEW_URI, mimeType: MCP_APP_MIME, text: mcpAppDocument(), _meta: { ui: { csp: { resourceDomains: ['https://fonts.googleapis.com', 'https://fonts.gstatic.com'] }, prefersBorder: false } } }] };
-  });
+  server.setRequestHandler(ListResourcesRequestSchema, async () => listMcpResources());
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => readMcpResource(request.params.uri));
   // One stable catalog for the whole session: clients that never re-fetch tools/list (Codex ignores list_changed) still
   // hold every tool. Lane, capability, owner and task access are enforced on each call instead.
   server.setRequestHandler(ListToolsRequestSchema, async () => {

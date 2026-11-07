@@ -8,7 +8,8 @@ import { assertIsolated, isolatedRuntime } from './isolated-common.mjs';
 // A worktree-scoped revline-local transport. The global connector remains on main.
 const state = assertIsolated();
 const settings = await isolatedRuntime();
-const upstream = new StreamableHTTPClientTransport(new URL(`https://${state.name}.convex.site/mcp`), { requestInit: { headers: { Authorization: `Bearer ${settings.REVLINE_MCP_TOKEN}` } } });
+// REVLINE_MCP_URL points it at another server for the same backend, such as `npm run dev:mcp` (cloudflare/mcp).
+const upstream = new StreamableHTTPClientTransport(new URL(process.env.REVLINE_MCP_URL || `https://${state.name}.convex.site/mcp`), { requestInit: { headers: { Authorization: `Bearer ${settings.REVLINE_MCP_TOKEN}` } } });
 const server = new Server({ name: 'revline-local', version: '1.0.0' }, { capabilities: { tools: {}, resources: {} } });
 let client, ready, closing = false;
 server.oninitialized = () => {

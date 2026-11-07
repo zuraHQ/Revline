@@ -3,9 +3,11 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
 
 const clerk = clerkMiddleware();
 
-// The MCP server and its OAuth endpoints run on Convex; tryrevline.com/mcp passes them
-// through so clients only ever see Revline's own domain (see convex/lib/mcp_origin.ts).
-const MCP_PATHS = /^\/(?:mcp|oauth\/(?:authorize|token|register|revoke)|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server)(?:\/mcp)?|\.well-known\/openid-configuration)$/;
+// Fallback path for the MCP server and its OAuth endpoints: the revline-mcp Worker (cloudflare/mcp) serves them on
+// tryrevline.com through routes, which take precedence over this Worker's custom domain. Without those routes
+// (before cutover, or after a rollback) tryrevline.com/mcp passes them through to Convex so clients only ever see
+// Revline's own domain (see convex/lib/mcp_origin.ts).
+const MCP_PATHS = /^\/(?:mcp(?:\/upload(?:\/model)?)?|oauth\/(?:authorize|token|register|revoke)|\.well-known\/(?:oauth-protected-resource|oauth-authorization-server)(?:\/mcp)?|\.well-known\/openid-configuration)$/;
 
 async function forwardToMcp(request: NextRequest) {
   const target = new URL(request.nextUrl.pathname + request.nextUrl.search, process.env.NEXT_PUBLIC_CONVEX_SITE_URL);

@@ -1,9 +1,11 @@
 import { ConvexError, v } from 'convex/values';
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from './_generated/server';
+import { internal } from './_generated/api';
 import type { Doc } from './_generated/dataModel';
 import { requireOwner } from './lib/auth';
 import { requireEditorAccess } from './lib/billing_access';
 import { mcpOrigins, publicMcpOrigin } from './lib/mcp_origin';
+import { CONSENT_APPROVAL_TTL_MS, signConsentApproval, verifyConsentApproval } from '../lib/mcp/consent-approval';
 
 // OAuth 2.1 for the MCP connector: public clients, PKCE S256 only, hashed tokens.
 const CODE_TTL = 10 * 60_000, ACCESS_TTL = 60 * 60_000, REFRESH_TTL = 60 * 24 * 60 * 60_000;
@@ -135,14 +137,57 @@ async function withinLimit(ctx: MutationCtx, key: string, limit: number, count =
 }
 
 /** Resolve a bearer token to its owner; counts tool calls against a per-minute limit. */
-export const authenticate = internalMutation({ args: { token: v.string(), calls: v.number() }, returns: v.union(v.object({ ownerId: v.string(), clientName: v.string(), grantId:v.string() }), v.object({ error: v.union(v.literal('invalid_token'), v.literal('plan'), v.literal('rate_limited')) })), handler: async (ctx, args) => {
+export const authenticate = internalMutation({ args: { token: v.string(), calls: v.number(), bridge: v.optional(v.boolean()) }, returns: v.union(v.object({ ownerId: v.string(), clientName: v.string(), grantId:v.string() }), v.object({ error: v.union(v.literal('invalid_token'), v.literal('plan'), v.literal('rate_limited')) })), handler: async (ctx, args) => {
   const hash = await sha256(args.token), now = Date.now();
   const token = await ctx.db.query('mcpTokens').withIndex('by_tokenHash', q => q.eq('tokenHash', hash)).unique();
   if (!token || token.kind === 'refresh' || token.revokedAt !== undefined || (token.expiresAt !== undefined && token.expiresAt < now)) return { error: 'invalid_token' as const };
+  // A grant key only works for the Cloudflare MCP server, through its signed bridge (convex/mcpBridgeHttp.ts).
+  if (token.kind === 'grant' && !args.bridge) return { error: 'invalid_token' as const };
   try { await requireConnectorAccess(ctx, token.ownerId); } catch { return { error: 'plan' as const }; }
   if (token.lastUsedAt === undefined || now - token.lastUsedAt > 60_000) await ctx.db.patch(token._id, { lastUsedAt: now });
   if (args.calls > 0 && !await withinLimit(ctx, token.ownerId, CALLS_PER_MINUTE, args.calls)) return { error: 'rate_limited' as const };
   return { ownerId: token.ownerId, clientName: token.label, grantId:token.grantId };
+}});
+
+// Connections approved through the Cloudflare MCP server (cloudflare/mcp). Its OAuth provider issues and rotates the
+// client's tokens; Convex keeps one "grant" row per connection whose key only that Worker holds. Every MCP request
+// authenticates that key here, so plan access, rate limits, the connector settings list and revocation stay in Convex.
+const GRANT_PENDING_MS = 15 * 60_000;
+
+/** Single use, through the runner's nonce table (convex/agentRunner.ts prunes it). */
+async function useNonce(ctx: MutationCtx, nonce: string, expiresAt: number) {
+  if (await ctx.db.query('agentRunnerNonces').withIndex('by_nonce', q => q.eq('nonce', nonce)).first()) return false;
+  await ctx.db.insert('agentRunnerNonces', { nonce, expiresAt });
+  return true;
+}
+
+export const createGrant = internalMutation({ args: { approval: v.string(), handle: v.string(), clientId: v.string(), clientName: v.string() }, returns: v.union(v.object({ ownerId: v.string(), grantId: v.string(), grantKey: v.string() }), v.object({ error: v.union(v.literal('invalid_approval'), v.literal('plan')) })), handler: async (ctx, args) => {
+  const approval = await verifyConsentApproval(process.env.MCP_BRIDGE_SECRET, args.approval);
+  if (!approval || approval.handle !== args.handle || !await useNonce(ctx, `consent:${approval.nonce}`, approval.expires + CONSENT_APPROVAL_TTL_MS)) return { error: 'invalid_approval' as const };
+  try { await requireConnectorAccess(ctx, approval.ownerId); } catch { return { error: 'plan' as const }; }
+  const grantKey = randomValue('rvl_gk_'), grantId = randomValue('grant_'), now = Date.now();
+  // Pending until the client redeems its code (touchGrant); expireGrant retires it if that never happens.
+  const id = await ctx.db.insert('mcpTokens', { tokenHash: await sha256(grantKey), kind: 'grant', ownerId: approval.ownerId, grantId, clientId: args.clientId.slice(0, 200), label: args.clientName.trim().slice(0, 100) || 'MCP client', createdAt: now, expiresAt: now + GRANT_PENDING_MS });
+  await ctx.scheduler.runAt(now + GRANT_PENDING_MS, internal.mcpAuth.expireGrant, { id });
+  return { ownerId: approval.ownerId, grantId, grantKey };
+}});
+
+/** Revokes a grant once it is past its expiry, so prune removes it like any dead token; a grant still in use waits again. */
+export const expireGrant = internalMutation({ args: { id: v.id('mcpTokens') }, returns: v.null(), handler: async (ctx, args) => {
+  const token = await ctx.db.get(args.id);
+  if (!token || token.kind !== 'grant' || token.revokedAt !== undefined) return null;
+  if ((token.expiresAt ?? 0) <= Date.now()) await ctx.db.patch(token._id, { revokedAt: Date.now() });
+  else await ctx.scheduler.runAt(token.expiresAt!, internal.mcpAuth.expireGrant, args);
+  return null;
+}});
+
+/** On each code exchange and refresh: a live grant slides to the refresh lifetime; false once it was revoked or expired. */
+export const touchGrant = internalMutation({ args: { grantKey: v.string() }, returns: v.boolean(), handler: async (ctx, args) => {
+  const tokenHash = await sha256(args.grantKey), now = Date.now();
+  const token = await ctx.db.query('mcpTokens').withIndex('by_tokenHash', q => q.eq('tokenHash', tokenHash)).unique();
+  if (!token || token.kind !== 'grant' || token.revokedAt !== undefined || (token.expiresAt ?? 0) < now) return false;
+  if ((token.expiresAt ?? 0) < now + REFRESH_TTL - 60 * 60_000) await ctx.db.patch(token._id, { expiresAt: now + REFRESH_TTL });
+  return true;
 }});
 
 // Signed-in pages: the consent screen and the profile's connector settings.
@@ -154,6 +199,25 @@ export const authorizationRequest = query({ args: { clientId: v.string(), redire
   const allowed = await requireConnectorAccess(ctx, ownerId).then(() => true, () => false);
   const url = new URL(args.redirectUri);
   return { ok: true as const, clientName: client.clientName, redirectHost: url.host || url.protocol.replace(/:$/, ''), trusted: trustedRedirect(args.redirectUri), allowed };
+}});
+
+/** The consent page for a Cloudflare OAuth request: what it may show about the redirect, and whether this account may connect. */
+export const consentAccess = query({ args: { redirectUri: v.string() }, returns: v.union(v.object({ ok: v.literal(true), redirectHost: v.string(), trusted: v.boolean(), allowed: v.boolean() }), v.object({ ok: v.literal(false), message: v.string() })), handler: async (ctx, args) => {
+  const ownerId = await requireOwner(ctx);
+  if (!validRedirectUri(args.redirectUri)) return { ok: false as const, message: 'This connection link is incomplete. Start again from the app you are connecting.' };
+  const allowed = await requireConnectorAccess(ctx, ownerId).then(() => true, () => false);
+  const url = new URL(args.redirectUri);
+  return { ok: true as const, redirectHost: url.host || url.protocol.replace(/:$/, ''), trusted: trustedRedirect(args.redirectUri), allowed };
+}});
+
+/** The signed-in user approves one consent handle; the page posts the result to the MCP server's /oauth/authorize. */
+export const approveConsent = mutation({ args: { handle: v.string() }, returns: v.object({ approval: v.string() }), handler: async (ctx, args) => {
+  const ownerId = await requireOwner(ctx);
+  await requireConnectorAccess(ctx, ownerId);
+  const secret = process.env.MCP_BRIDGE_SECRET;
+  if (!secret) throw new ConvexError('Connecting apps is not configured on this server.');
+  if (!args.handle || args.handle.length > 500) throw new ConvexError('This connection link is incomplete. Start again from the app you are connecting.');
+  return { approval: await signConsentApproval(secret, { ownerId, handle: args.handle, nonce: crypto.randomUUID(), expires: Date.now() + CONSENT_APPROVAL_TTL_MS }) };
 }});
 
 export const approve = mutation({ args: { clientId: v.string(), redirectUri: v.string(), codeChallenge: v.string(), codeChallengeMethod: v.string(), state: v.optional(v.string()), resource: v.optional(v.string()) }, returns: v.object({ redirectTo: v.string() }), handler: async (ctx, args) => {

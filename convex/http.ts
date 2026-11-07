@@ -8,6 +8,7 @@ import { registerAlertWebhooks } from './alertWebhooks';
 import { registerMcpRoutes } from './mcpHttp';
 import { prepare as prepareMcpUpload } from './mcpUploads';
 import { registerAgentRunnerRoutes } from './agentRunnerHttp';
+import { registerMcpBridgeRoutes } from './mcpBridgeHttp';
 import { registerAppleBillingRoutes } from './appleBillingHttp';
 import { discordWebhookUrl } from './lib/discord_alert';
 const http = httpRouter();
@@ -16,6 +17,7 @@ registerAlertWebhooks(http);
 registerMcpRoutes(http);
 http.route({ path: '/mcp/upload', method: 'POST', handler: prepareMcpUpload });
 registerAgentRunnerRoutes(http);
+registerMcpBridgeRoutes(http);
 registerAppleBillingRoutes(http);
 const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type", "Content-Type": "application/json" };
 // A shared timeline's link preview image (Open Graph / X card), 1200x630 JPEG.
@@ -28,7 +30,7 @@ http.route({ path: "/share-card", method: "GET", handler: httpAction(async (ctx,
   return new Response(bytes, { headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=300" } });
 }) });
 http.route({ path: "/uploads", method: "OPTIONS", handler: httpAction(async () => new Response(null, { status: 204, headers })) });
-http.route({ path: "/uploads", method: "POST", handler: httpAction(async (ctx, request) => {
+const storeUpload = httpAction(async (ctx, request) => {
   const token = new URL(request.url).searchParams.get("ticket");
   if (!token) return new Response(JSON.stringify({ error: "Missing upload ticket" }), { status: 400, headers });
   let storageId;
@@ -45,7 +47,10 @@ http.route({ path: "/uploads", method: "POST", handler: httpAction(async (ctx, r
     if (storageId) await ctx.storage.delete(storageId);
     return new Response(JSON.stringify({ error: "Upload failed. Request a new upload URL and retry." }), { status: 400, headers });
   }
-}) });
+});
+http.route({ path: "/uploads", method: "POST", handler: storeUpload });
+// The same ticketed upload under the MCP server's public address, for the uploadMedia model script (mcpUploads.ts).
+http.route({ path: "/mcp/upload/model", method: "POST", handler: storeUpload });
 if (process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET) {
   http.route({ path: '/stripe/webhook', method: 'POST', handler: httpAction(async (ctx, request) => {
     const signature = request.headers.get('stripe-signature');
