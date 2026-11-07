@@ -8,6 +8,7 @@ const sections = [
   { label: 'Clipping', note: 'Turn streams into vertical clips', href: '/#clippers' },
   { label: 'Motion design', note: 'Launch films and motion graphics', href: '/#motion-design' },
   { label: 'Features', note: 'Effects done by asking', href: '/#features' },
+  { label: 'Genesis', note: 'Select and layer anything, via MCP', href: '/#genesis' },
 ];
 
 export function LandingProductMenu() {

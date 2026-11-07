@@ -3,6 +3,7 @@ import { LandingHero } from '@/components/landing/hero';
 import { LandingFeatures } from '@/components/landing/features';
 import { LandingMotionDesign } from '@/components/landing/motion-design';
 import { LandingClippers } from '@/components/landing/clippers';
+import { LandingGenesis } from '@/components/landing/genesis';
 import { LandingMcp } from '@/components/landing/mcp';
 import { LandingPricing } from '@/components/landing/pricing';
 import { LandingFaq } from '@/components/landing/faq';
@@ -45,6 +46,7 @@ export default function Home() {
     <LandingClippers />
     <LandingMotionDesign />
     <LandingFeatures />
+    <LandingGenesis />
     <LandingMcp />
     <LandingPricing />
     <LandingFaq />

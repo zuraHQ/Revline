@@ -1,0 +1,17 @@
+{
+  "section": "Landing: Revline Genesis (components/landing/genesis.tsx)",
+  "license": {
+    "name": "Mixkit Stock Video Free License",
+    "url": "https://mixkit.co/license/#videoFree",
+    "author": "Mixkit (Envato); Mixkit pages name no individual creator"
+  },
+  "production": "Posters are 960x540 WebP stills from the same Mixkit clips the SAM 3.1 launch film uses. Layers, Select, Color and Text are real Meta SAM 3.1 single-image masks (sam-3.1 on Meta's Model API, via lib/server/meta-sam.ts from PR #205) on the listed frame: Layers dims the background and outlines the four object layers; Select outlines the prompted object; Color keeps the mask in colour over a greyscale frame; Text draws the title in Outfit Bold and pastes the masked subject back over it. Speed and Replace are plain source frames with no effect. Each loop, when cut from the launch film, goes at the listed video path.",
+  "tabs": [
+    { "tab": "layers", "poster": "layers.webp", "video": "layers.mp4", "clip": "Couple walking with their dogs through a park", "sourceUrl": "https://mixkit.co/free-stock-video/couple-walking-with-their-dogs-through-a-park-10366/", "frameSeconds": 6.0, "sam": [{ "prompt": "noun: person", "objects": 2 }, { "prompt": "noun: dog", "objects": 2 }] },
+    { "tab": "select", "poster": "select.webp", "video": "select.mp4", "clip": "Pedestrian walk in Tokyo", "sourceUrl": "https://mixkit.co/free-stock-video/pedestrian-walk-in-tokyo-4231/", "frameSeconds": 4.4, "sam": [{ "prompt": "object: box 340,470-800,1080 and point 520,800 on the woman with the black parasol", "objects": 1 }] },
+    { "tab": "speed", "poster": "speed.webp", "video": "speed.mp4", "clip": "Woman on a trick ramp and skater boy", "sourceUrl": "https://mixkit.co/free-stock-video/woman-on-a-trick-ramp-and-skater-boy-2549/", "frameSeconds": 3.0, "sam": [] },
+    { "tab": "color", "poster": "color.webp", "video": "color.mp4", "clip": "Fashion woman dressed in red", "sourceUrl": "https://mixkit.co/free-stock-video/fashion-woman-dressed-in-red-18208/", "frameSeconds": 6.0, "sam": [{ "prompt": "noun: woman", "objects": 1 }] },
+    { "tab": "text", "poster": "text.webp", "video": "text.mp4", "clip": "Man walking wearing activewear", "sourceUrl": "https://mixkit.co/free-stock-video/man-walking-wearing-activewear-596/", "frameSeconds": 0.5, "sam": [{ "prompt": "noun: man", "objects": 1 }] },
+    { "tab": "replace", "poster": "replace.webp", "video": "replace.mp4", "clip": "A hand reaches for a mobile phone featuring a green screen", "sourceUrl": "https://mixkit.co/free-stock-video/a-hand-reaches-for-a-mobile-phone-featuring-a-green-100070/", "frameSeconds": 2.3, "sam": [] }
+  ]
+}
