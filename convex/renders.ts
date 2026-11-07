@@ -17,7 +17,7 @@ import { renderSummaryDocument } from "./schema";
 import { MAX_EXPORT_SECONDS } from '../lib/editor/limits';
 import { timelineDuration } from '../lib/editor/types';
 import { cancelMediaTask, enqueueMediaTask, failMediaTask } from './lib/media_queue';
-import { accountLimit } from './lib/account_limits';import { sceneMediaAssetIds } from '../lib/editor/scene-layers';
+import { accountLimit, consumeFairUse } from './lib/account_limits';import { sceneMediaAssetIds } from '../lib/editor/scene-layers';
 
 const activeExportLimit = () => accountLimit('MAX_ACTIVE_EXPORTS_PER_ACCOUNT', 2, 1, 10);
 const startRenderForArgs = { burnCaptions: v.optional(v.boolean()), projectId: v.id("projects"), resolution: v.number(), fps: v.number(), quality: v.string(), clipId:v.optional(v.string()), timelineId:v.optional(v.string()) };
@@ -37,6 +37,8 @@ export async function startRenderFor(ctx: MutationCtx, ownerId: string, args: Ob
   if(args.burnCaptions === false) snapshot = {...snapshot, clips: snapshot.clips.filter(clip => clip.kind !== 'caption')};
   const timeline = await validateTimeline(ctx, project, snapshot); if (!timeline.clips.length) throw new ConvexError("Add a clip before exporting");
   if (timelineDuration(timeline) > MAX_EXPORT_SECONDS) throw new ConvexError("Exports currently support up to five minutes. Shorten the final edit before exporting; your full arrangement remains saved.");
+  // Fair-use export minutes: metered here, capped only once FAIR_USE_MONTHLY.exportRenderMinutes is a number.
+  await consumeFairUse(ctx, ownerId, 'exportRenderMinutes', Math.ceil(timelineDuration(timeline) / 60));
   // With hosted exports, seats bound concurrent renders; beyond them exports wait in a longer queue.
   const limit = hostedRendersEnabled() ? queuedExportLimit(ultra) : activeExportLimit();
   // The indexed reads and insert share one transaction, so separate projects

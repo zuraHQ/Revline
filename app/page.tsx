@@ -8,7 +8,7 @@ import { LandingPricing } from '@/components/landing/pricing';
 import { LandingFaq } from '@/components/landing/faq';
 import { LandingFinalCta } from '@/components/landing/final-cta';
 import { LandingFooter } from '@/components/landing/footer';
-import { EDITOR_PLAN } from '@/lib/billing/plan';
+import { EDITOR_PLAN, MCP_PLAN } from '@/lib/billing/plan';
 import type { Metadata } from 'next';
 import './landing.css';
 
@@ -27,12 +27,12 @@ const structuredData = {
       operatingSystem: 'Web', image: 'https://tryrevline.com/og-revline-v3.png',
       description: 'An AI video editor for prompt-based cuts, captions, vertical clips, motion design and reference video recreation, with MCP access for AI agents.',
       brand: { '@id': 'https://tryrevline.com/#organization' },
-      offers: {
-        '@type': 'Offer', url: 'https://tryrevline.com/pricing', price: EDITOR_PLAN.monthlyPrice,
-        priceCurrency: EDITOR_PLAN.currency,
-        priceSpecification: { '@type': 'UnitPriceSpecification', price: EDITOR_PLAN.monthlyPrice, priceCurrency: EDITOR_PLAN.currency, unitText: 'month' },
-        description: `${EDITOR_PLAN.trialDays}-day trial, then $${EDITOR_PLAN.monthlyPrice} USD per month.`,
-      },
+      offers: [EDITOR_PLAN, MCP_PLAN].map(plan => ({
+        '@type': 'Offer', name: plan === EDITOR_PLAN ? 'Revline Pro' : plan.name, url: 'https://tryrevline.com/pricing', price: plan.monthlyPrice,
+        priceCurrency: plan.currency,
+        priceSpecification: { '@type': 'UnitPriceSpecification', price: plan.monthlyPrice, priceCurrency: plan.currency, unitText: 'month' },
+        description: `${plan.trialDays}-day trial, then $${plan.monthlyPrice} USD per month.`,
+      })),
     },
   ],
 };

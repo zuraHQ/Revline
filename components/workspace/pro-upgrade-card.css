@@ -1,0 +1,9 @@
+.pro-upgrade-card[data-slot=card]{margin:0 0 4px;background:#2a2a2a;box-shadow:none;--tw-ring-color:#ffffff1a;color:#f2f2f2}
+.pro-upgrade-card [data-slot=card-description]{color:#a3a3a3;font-size:12px;line-height:1.5}
+.pro-upgrade-body{display:flex;flex-direction:column;gap:10px}
+.pro-upgrade-body ul{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;font-size:12px}
+.pro-upgrade-body li{display:flex;align-items:center;gap:8px}
+.pro-upgrade-body li svg{flex-shrink:0;color:var(--revline-accent)}
+.pro-upgrade-body [data-slot=button]{width:100%;justify-content:center}
+.pro-upgrade-body small,.pro-upgrade-body p{margin:0;color:#a3a3a3;font-size:11px;line-height:1.5;text-align:center}
+.pro-upgrade-body .pro-upgrade-error{color:#e5484d}

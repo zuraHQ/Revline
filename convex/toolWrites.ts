@@ -17,7 +17,7 @@ const mutations = new Set([
   'generatedImages:prepare', 'generatedImages:save', 'generatedImages:cleanup', 'aiCosts:record',
   'assistant:apply', 'assistant:undoLatestEdit', 'assistant:createRunTimeline', 'assistant:openRunTimeline',
   'assistant:beginEditing', 'assistant:previewDraft', 'assistant:requestAnalysis', 'assistant:clearAnalysis',
-  'assistant:attachRunStockAudio', 'assistant:reserveAudioRequest', 'assistant:saveGeneratedSound', 'assistant:importRunVideo', 'assistant:exportRunVideo',
+  'assistant:attachRunStockAudio', 'assistant:reserveAudioRequest', 'assistant:reserveSoundGeneration', 'assistant:saveGeneratedSound', 'assistant:importRunVideo', 'assistant:exportRunVideo',
   'blueprints:requestCheck', 'blueprints:saveFromCheck', 'brandKits:create', 'brandKits:update',
   'compositionReview:savePlan', 'compositionReview:request', 'compositionReview:cancel',
   'cutouts:startFromRun', 'derivations:startFromRun',

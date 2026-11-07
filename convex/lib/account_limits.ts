@@ -1,6 +1,8 @@
 import { ConvexError } from 'convex/values';
 import { initializeMediaCapacity } from './media_task_data';
 import type { MutationCtx, QueryCtx } from '../_generated/server';
+import { FAIR_USE_LABELS, FAIR_USE_MONTHLY, type FairUseKind } from '../../lib/billing/plan';
+import { billingEnabled } from './billing_access';
 
 const MINUTE_MS = 60_000;
 /** One video needs three tasks (extract, preview, then transcribe),
@@ -49,20 +51,35 @@ export async function requireMediaTaskCapacity(ctx: QueryCtx | MutationCtx, owne
   if (!await hasMediaTaskCapacity(ctx, ownerId, incoming, options)) throw new ConvexError(`Your account has too many media jobs processing (up to ${activeMediaTaskLimit()} at once). Wait for some to finish, then try again.`);
 }
 
-type Quota = { period: number; max: number; message: string };
-/** Fixed windows aligned to UTC minutes and days. One row per owner, name and
- * period keeps each check to a single indexed read; a refused request rolls
+type Quota = { period: number; max: number; message: string | ConvexError<{ code: string; message: string }>; windowStart?: (now: number) => number };
+/** Fixed windows aligned to UTC minutes and days (or a quota's own windowStart). One row per
+ * owner, name and period keeps each check to a single indexed read; a refused request rolls
  * back with its mutation and consumes nothing. */
-async function consumeAccountQuota(ctx: MutationCtx, ownerId: string, name: string, quotas: readonly Quota[]) {
+async function consumeAccountQuota(ctx: MutationCtx, ownerId: string, name: string, quotas: readonly Quota[], amount = 1) {
   const now = Date.now();
   for (const quota of quotas) {
-    const windowStart = now - now % quota.period;
+    const windowStart = quota.windowStart?.(now) ?? now - now % quota.period;
     const row = await ctx.db.query('accountRateLimits').withIndex('by_owner_name_period', q => q.eq('ownerId', ownerId).eq('name', name).eq('period', quota.period)).unique();
     const count = row && row.windowStart === windowStart ? row.count : 0;
-    if (count >= quota.max) throw new ConvexError(quota.message);
-    if (row) await ctx.db.patch(row._id, { windowStart, count: count + 1 });
-    else await ctx.db.insert('accountRateLimits', { ownerId, name, period: quota.period, windowStart, count: 1 });
+    if (count + amount > quota.max) throw typeof quota.message === 'string' ? new ConvexError(quota.message) : quota.message;
+    if (row) await ctx.db.patch(row._id, { windowStart, count: count + amount });
+    else await ctx.db.insert('accountRateLimits', { ownerId, name, period: quota.period, windowStart, count: amount });
   }
+}
+
+/** Keys the monthly rows apart from the minute and day windows; the window itself is the UTC calendar month. */
+const MONTH_PERIOD = 31 * 24 * MINUTE_MS * 60;
+const utcMonthStart = (now: number) => { const date = new Date(now); return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1); };
+
+/** Fair use on per-run paid work (lib/billing/plan.ts FAIR_USE_MONTHLY), for every plan. Counted when a
+ * run is queued, so reused results cost nothing. Deployments without billing meter no one, as with model access. */
+export async function consumeFairUse(ctx: MutationCtx, ownerId: string, kind: FairUseKind, amount = 1) {
+  const cap: number | null = FAIR_USE_MONTHLY[kind];
+  if (!billingEnabled() || amount <= 0) return;
+  // An uncapped kind still records its monthly usage, so a later cap starts from real numbers.
+  const max = cap ?? Number.MAX_SAFE_INTEGER;
+  const message = `This would pass this month's allowance of ${max} ${FAIR_USE_LABELS[kind]}. Ask for fewer, or wait until it resets on the 1st (UTC).`;
+  await consumeAccountQuota(ctx, ownerId, `fairUse:${kind}`, [{ period: MONTH_PERIOD, max, windowStart: utcMonthStart, message: new ConvexError({ code: 'FAIR_USE_LIMIT', message }) }], amount);
 }
 
 // Burst limits only: members have no daily caps on imports or AI requests.

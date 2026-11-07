@@ -6,7 +6,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { requireOwner, requireProject } from './lib/auth';
 import { requireEditorAccess } from './lib/billing_access';
-import { requireMediaTaskCapacity } from './lib/account_limits';
+import { consumeFairUse, requireMediaTaskCapacity } from './lib/account_limits';
 import { readProject } from './lib/project_data';
 import { commitTimeline, currentTimeline } from './lib/timeline';
 import { editingWorkflowActive } from './lib/assistant_workflow';
@@ -55,6 +55,8 @@ export async function startCutoutFor(ctx: MutationCtx, ownerId: string, projectI
     return { cutoutId: row._id, estimatedUsd: 0, alreadyRunning: false, reused: true };
   }
   await requireMediaTaskCapacity(ctx, ownerId, 1);
+  // Foreground cut-outs segment the video with SAM (a selected subject, or auto-segment); person matting does not.
+  if (mode === 'foreground') await consumeFairUse(ctx, ownerId, 'samVideoSegments');
   const fps = currentTimeline(project).fps;
   const cutoutId = await ctx.db.insert('cutouts', { ownerId, projectId: project._id, clipId, sourceAssetId: asset._id, start, end, fps, mode, ...(selection ? { selection } : {}), ...(effect ? { effect } : {}), status: 'queued', createdAt: Date.now() });
   // Foreground mode requires the current processor; old workers only know person matting.

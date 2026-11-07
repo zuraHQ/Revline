@@ -668,6 +668,7 @@ export function createEditorToolkit(ctx: ActionCtx, options: EditorToolkitOption
   // Generate with ElevenLabs, upload to the project's R2 media like an upload, and register an ordinary audio asset holding its request.
   const reserveAudio = async () => { abortSignal.throwIfAborted(); await ctx.runMutation(internal.assistant.reserveAudioRequest, run); abortSignal.throwIfAborted(); };
   const createGeneratedSound = async (request: SoundEffectRequest, name?: string) => {
+    await ctx.runMutation(internal.assistant.reserveSoundGeneration, run);
     const { samples, rate } = await generateSoundEffect(request, abortSignal, reserveAudio), key = newProjectMediaKey(run.ownerId, run.projectId);
     const size = await putMediaObject(key, encodeWav(samples, rate), 'audio/wav');
     try {

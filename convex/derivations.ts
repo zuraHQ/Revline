@@ -8,7 +8,7 @@ import { internalMutation, internalQuery, type MutationCtx } from './_generated/
 import type { Doc, Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { requireEditorAccess } from './lib/billing_access';
-import { requireMediaTaskCapacity } from './lib/account_limits';
+import { consumeFairUse, requireMediaTaskCapacity } from './lib/account_limits';
 import { readProject } from './lib/project_data';
 import { commitTimeline, currentTimeline } from './lib/timeline';
 import { editingWorkflowActive } from './lib/assistant_workflow';
@@ -82,6 +82,7 @@ export async function startDerivation(ctx: MutationCtx, input: StartInput) {
     if (output && output.projectId === project._id) return { derivationId: row._id, status: 'completed' as const, outputAssetId: output._id, estimatedUsd: 0 };
   }
   await requireMediaTaskCapacity(ctx, input.ownerId, 1);
+  if (input.op === 'upscale') await consumeFairUse(ctx, input.ownerId, 'upscales');
   const derivationId = await ctx.db.insert('derivations', { ownerId: input.ownerId, projectId: project._id, clipId: input.clipId, sourceAssetId: asset._id, op: input.op, start, end,
     ...(input.selection ? { selection: input.selection } : {}), ...(input.backgroundPrompt !== undefined ? { backgroundPrompt: input.backgroundPrompt } : {}), ...(input.time !== undefined ? { time: input.time } : {}), ...(input.factor ? { factor: input.factor } : {}), ...(input.scale ? { scale: input.scale } : {}), ...(input.target ? { target: input.target } : {}),
     ...(input.placeLater ? { placeLater: true } : {}), status: 'queued', createdAt: Date.now() });

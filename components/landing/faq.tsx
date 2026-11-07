@@ -9,7 +9,7 @@ const questions = [
   ['What file formats and lengths are supported?', 'Upload common video, audio and image files, or import a YouTube link. Long recordings are fine.'],
   ['Will my videos use my brand fonts and colors?', 'Ask for them in the conversation. Revline can style captions and titles with its built-in fonts and the colors you choose.'],
   ['Is my footage private?', 'Your projects belong to your account and require sign-in. Your footage is used to prepare your edits and exports.'],
-  ['How much does Revline cost? Is there a free plan?', 'Revline is one plan at $39 USD per month, after a 3-day free trial. Cancel before the trial ends if you don’t want to continue.'],
+  ['How much does Revline cost? Is there a free plan?', 'Revline MCP is $19 USD per month: edit from Claude, ChatGPT, Codex or Cursor, with the web editor for manual edits. Revline Pro is $39 USD per month and adds editing by prompting inside Revline. Both start with a 3-day free trial. Cancel before the trial ends if you don’t want to continue.'],
 ];
 
 export function LandingFaq() {

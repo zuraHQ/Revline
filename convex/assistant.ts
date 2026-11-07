@@ -31,7 +31,7 @@ import { startRenderFor } from './renders';
 import { activeTabOf, createTabFor, listTabsFor, openTabFor, storedTabTimeline, tabsOf } from './timelineTabs';
 import { withoutSceneCode } from '../lib/editor/scene-code';
 import { activeAppleEntitlement } from './lib/apple_entitlements';
-import { hasPaidModelAccess, requireEditorAccess } from './lib/billing_access';
+import { hasPaidModelAccess, requireEditorAccess, requireInAppAgentAccess, requireRunPlan } from './lib/billing_access';
 import { abortStream, createThread, listStreams, listUIMessages, saveMessage, syncStreams, vPaginationResult, vStreamArgs } from "@convex-dev/agent";
 import { vStreamDelta, vStreamMessage } from "@convex-dev/agent/validators";
 import { paginationOptsValidator } from "convex/server";
@@ -49,7 +49,7 @@ import { normalizeTimeline } from '../lib/editor/types';
 import {savePublicationReceipt} from './lib/publicationReceipt';
 import { finishIncidentRun, publishIncidentRun } from './lib/save_incidents';
 import { enqueueMediaTask, cancelMediaTask, detachAnalysisRequest } from './lib/media_queue';
-import { consumeAssistantRequest, consumeAudioRequest, requireMediaTaskCapacity } from './lib/account_limits';
+import { consumeAssistantRequest, consumeAudioRequest, consumeFairUse, requireMediaTaskCapacity } from './lib/account_limits';
 import { FREE_EDITOR_MODEL_CHOICE, EDITOR_PROVIDER_REASON, allowedClaudeModelChoices, enforceClaudeModelPolicy, freeEditorModel, assertEditorModelConfigured, claudeModelSwitcherEnabled, defaultEditorModelChoice, defaultEditorReasoningEffort, normalizeEditorReasoningEffort, resolveClaudeModel, withEditorReasoning, withEditorSpeed } from '../lib/ai/claude-model';
 import { claudeModelChoiceValidator, legacyCompatibleModelChoiceValidator, editorReasoningEffortValidator, storedEditorReasoningEffortValidator, editorSpeedModeValidator, pinnedClaudeModelValidator } from './lib/claude_model';
 import { assistantRecovery } from './lib/assistant_recovery';
@@ -147,7 +147,7 @@ async function clearLivePreview(ctx:import('./_generated/server').MutationCtx,pr
 }
 export const send = mutation({ args: { projectId: v.id("projects"), prompt: v.string(), clientPlatform: v.optional(v.literal("ios")), modelChoice: v.optional(legacyCompatibleModelChoiceValidator), reasoningEffort: v.optional(storedEditorReasoningEffortValidator), speedMode: v.optional(editorSpeedModeValidator), // Older clients still send editMode; it validates and is ignored. The lane sets the checks.
   editMode: v.optional(editorEditModeValidator), attachedAssetIds:v.optional(v.array(v.id('assets'))), selectedClipId: v.optional(v.string()), selectedClipIds: v.optional(v.array(v.string())), playhead: v.optional(v.number()), timelineId: v.optional(v.string()) }, returns: v.null(), handler: async (ctx, args) => {
-  const ownerId = await requireOwner(ctx); await requireEditorAccess(ctx, ownerId); const project = await requireProject(ctx, args.projectId, ownerId);
+  const ownerId = await requireOwner(ctx); await requireInAppAgentAccess(ctx, ownerId); const project = await requireProject(ctx, args.projectId, ownerId);
   const paidModelAccess = await hasPaidModelAccess(ctx, ownerId);
   const mobile = args.clientPlatform === 'ios';
   if(mobile){const user=await ctx.db.query('users').withIndex('by_clerk_id',q=>q.eq('clerkId',ownerId)).unique();if(user?.aiConsentVersion!==1)throw new ConvexError('Review and allow AI data sharing before editing.');}
@@ -189,7 +189,7 @@ export const send = mutation({ args: { projectId: v.id("projects"), prompt: v.st
 type QueuedContext=Pick<Doc<'assistantQueue'>,'command'|'attachedAssetIds'|'selectedClipId'|'selectedClipIds'|'playhead'|'timelineId'>;
 /** Retry is a continuation of an existing prompt; it never writes a user message. */
 export const retry = mutation({args:{projectId:v.id('projects'),promptMessageId:v.string()},returns:v.null(),handler:async(ctx,args)=>{
-  const ownerId=await requireOwner(ctx);await requireEditorAccess(ctx,ownerId);
+  const ownerId=await requireOwner(ctx);await requireInAppAgentAccess(ctx,ownerId);
   const project=await requireProject(ctx,args.projectId,ownerId);
   const [prompt]=await ctx.runQuery(components.agent.messages.getMessagesByIds,{messageIds:[args.promptMessageId]});
   if(!prompt||prompt.threadId!==project.threadId||prompt.message?.role!=='user')throw new ConvexError('The original request is no longer available in this conversation.');
@@ -400,7 +400,7 @@ export const modelForRun = internalQuery({
   returns: pinnedClaudeModelValidator,
   handler: async (ctx, args): Promise<ClaudeModelSelection> => {
     await requireActiveRun(ctx, args);
-    await requireEditorAccess(ctx, args.ownerId);
+    await requireRunPlan(ctx, args.ownerId, args.runId);
     if (!await hasPaidModelAccess(ctx, args.ownerId)) return freeEditorModel();
     return validatePinnedClaudeModel(args.pinnedModel ?? resolveClaudeModel());
   },
@@ -499,6 +499,14 @@ export const reserveAudioRequest=internalMutation({args:runArgs,returns:v.null()
   if(!args.runId.startsWith(READ_ONLY_RUN_PREFIX)&&(run.aiRunId!==args.runId||!run.aiRunning))throw new ConvexError('AI run is no longer active');
   await requireEditorAccess(ctx,args.ownerId);
   await consumeAudioRequest(ctx,args.ownerId);
+  return null;
+}});
+/** Once per generated sound effect, before the provider call; its HTTP attempts still reserve audio requests. */
+export const reserveSoundGeneration=internalMutation({args:runArgs,returns:v.null(),handler:async(ctx,args)=>{
+  const run=await projectRun(ctx,args.projectId,args.ownerId);
+  if(!args.runId.startsWith(READ_ONLY_RUN_PREFIX)&&(run.aiRunId!==args.runId||!run.aiRunning))throw new ConvexError('AI run is no longer active');
+  await requireEditorAccess(ctx,args.ownerId);
+  await consumeFairUse(ctx,args.ownerId,'soundGenerations');
   return null;
 }});
 /** Register a sound the assistant rendered and uploaded; storage counts like an upload, with no analysis tasks. */
@@ -732,7 +740,7 @@ export const removeQueued=mutation({args:{projectId:v.id('projects'),id:v.id('as
   await ctx.db.delete(row._id);return null;
 }});
 export const resumeQueue=mutation({args:{projectId:v.id('projects')},returns:v.null(),handler:async(ctx,{projectId})=>{
-  const ownerId=await requireOwner(ctx);await requireProject(ctx,projectId,ownerId);await requireEditorAccess(ctx,ownerId);
+  const ownerId=await requireOwner(ctx);await requireProject(ctx,projectId,ownerId);await requireInAppAgentAccess(ctx,ownerId);
   await writeProject(ctx,projectId,{aiQueuePaused:false});
   await ctx.scheduler.runAfter(0,internal.assistant.drainQueue,{projectId,ownerId});return null;
 }});
@@ -759,7 +767,7 @@ export const startQueued=internalMutation({args:{projectId:v.id('projects'),owne
   if(project.aiRunning||project.aiQueuePaused)return null;
   const row=await ctx.db.query('assistantQueue').withIndex('by_project',q=>q.eq('projectId',args.projectId)).first();
   if(!row||row._id!==args.id||row.ownerId!==args.ownerId)return null;
-    await requireEditorAccess(ctx,args.ownerId);
+    await requireInAppAgentAccess(ctx,args.ownerId);
     // A queued choice the plan no longer allows (Opus in-app on Pro) falls back to the default.
     const paidModelAccess=await hasPaidModelAccess(ctx,args.ownerId);
     const queued=paidModelAccess?validatePinnedClaudeModel(row.pinnedModel):freeEditorModel();

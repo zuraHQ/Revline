@@ -7,10 +7,11 @@ import Link from 'next/link';
 import { useAction } from 'convex/react';
 import { Check, LoaderCircle } from 'lucide-react';
 import { api } from '@/convex/_generated/api';
-import { EDITOR_PLAN, PRO_FEATURES } from '@/lib/billing/plan';
+import { EDITOR_PLAN, MCP_FEATURES, MCP_PLAN, PRO_FEATURES } from '@/lib/billing/plan';
 import { PrimaryButton } from './primary-button';
 import { usePlanStatus } from './use-plan-status';
 import { UltraPlanCard } from './ultra-plan-card';
+import { PlanCard } from './plan-card';
 import { WorkspaceNav } from './workspace-nav';
 import './shared.css';
 import './editor-access-gate.css';
@@ -20,7 +21,7 @@ export function EditorAccessGate({ children, loading, checkoutPending = false }:
   const status = usePlanStatus();
   const checkout = useAction(api.billing.createCheckout);
   const portal = useAction(api.billing.createPortal);
-  const [busy, setBusy] = useState<'' | 'pro' | 'ultra'>('');
+  const [busy, setBusy] = useState<'' | 'pro' | 'ultra' | 'mcp'>('');
   const [error, setError] = useState('');
   const inFlight = useRef(false);
 
@@ -37,7 +38,7 @@ export function EditorAccessGate({ children, loading, checkoutPending = false }:
   </div>;
   const trial = status.trialEligible && !paymentIssue;
 
-  async function openCheckout(plan: 'pro' | 'ultra' = 'pro') {
+  async function openCheckout(plan: 'pro' | 'ultra' | 'mcp' = 'pro') {
     if (!status?.configured || inFlight.current) return;
     inFlight.current = true; setBusy(plan); setError('');
     try {
@@ -52,6 +53,27 @@ export function EditorAccessGate({ children, loading, checkoutPending = false }:
 
   // A member whose payment failed fixes it first; everyone else picks a plan.
   const offerUltra = status.ultraAvailable && !paymentIssue;
+  const offerMcp = status.mcpAvailable && !paymentIssue;
+  const startLabel = (plan: 'pro' | 'mcp') => trial ? `Start ${(plan === 'mcp' ? MCP_PLAN : EDITOR_PLAN).trialDays}-day free trial` : plan === 'mcp' ? 'Get Revline MCP' : 'Start creating';
+  if (offerMcp) return <div className="workspace-page editor-access-page">
+    <WorkspaceNav title={NEW_WORKSPACE_LABEL} />
+    <main className="editor-access-main" data-plans={offerUltra ? 3 : 2}>
+      <h1 className="sr-only">Choose your Revline plan</h1>
+      <PlanCard id="mcp-plan" title={MCP_PLAN.name} description="Edit from your AI agent." price={MCP_PLAN.monthlyPrice} currency={MCP_PLAN.currency} features={MCP_FEATURES}>
+        <PrimaryButton disabled={!!busy || !status.configured} onClick={() => void openCheckout('mcp')}>{busy === 'mcp' && <LoaderCircle size={14} className="animate-spin" />}{startLabel('mcp')}</PrimaryButton>
+      </PlanCard>
+      <PlanCard id="pro-plan" title="Revline Pro" description="Also edit by prompting in Revline." price={EDITOR_PLAN.monthlyPrice} currency={EDITOR_PLAN.currency} features={PRO_FEATURES}>
+        <PrimaryButton disabled={!!busy || !status.configured} onClick={() => void openCheckout('pro')}>{busy === 'pro' && <LoaderCircle size={14} className="animate-spin" />}{startLabel('pro')}</PrimaryButton>
+      </PlanCard>
+      {offerUltra && <UltraPlanCard>
+        <PrimaryButton disabled={!!busy || !status.configured} onClick={() => void openCheckout('ultra')}>{busy === 'ultra' && <LoaderCircle size={14} className="animate-spin" />}Get Ultra</PrimaryButton>
+      </UltraPlanCard>}
+      {(!status.configured || error) && <div className="editor-access-notes">
+        {!status.configured && <p role="status">Billing is temporarily unavailable. Please try again shortly.</p>}
+        {error && <p className="editor-access-error" role="alert">{error}</p>}
+      </div>}
+    </main>
+  </div>;
   return <div className="workspace-page editor-access-page">
     <WorkspaceNav title={NEW_WORKSPACE_LABEL} />
     <main className="editor-access-main" data-plans={offerUltra || undefined}>

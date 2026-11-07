@@ -5,6 +5,7 @@ import { assetDocument, imageGenerationValidator } from './schema';
 import { projectIdentity, projectRun } from './lib/project_data';
 import { internal } from './_generated/api';
 import { requireEditorAccess } from './lib/billing_access';
+import { consumeFairUse } from './lib/account_limits';
 import { recordAssetStorage } from './lib/storage_accounting';
 import { hydrateAsset } from './lib/asset_analysis';
 import { projectMediaPrefix } from './lib/media_storage';
@@ -23,6 +24,7 @@ async function requireCapacity(ctx: MutationCtx, args: { ownerId: string; projec
 /** Check paid access and space before making a provider call. */
 export const prepare = internalMutation({ args: { ...scope, count: v.number() }, returns: v.null(), handler: async (ctx, args) => {
   await requireCapacity(ctx, args, args.count);
+  await consumeFairUse(ctx, args.ownerId, 'imageGenerations', args.count);
   return null;
 } });
 
